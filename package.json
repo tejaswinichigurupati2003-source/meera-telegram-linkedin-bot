@@ -1,0 +1,19 @@
+{
+  "name": "meera-telegram-linkedin-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rewrites Meera's raw Telegram notes into LinkedIn drafts in her voice and replies them back into the channel.",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@vercel/functions": "^1.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@vercel/node": "^3.2.0",
+    "typescript": "^5.5.0"
+  }
+}

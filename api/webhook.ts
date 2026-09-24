@@ -1,0 +1,98 @@
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { waitUntil } from "@vercel/functions";
+import { getMe, sendMessage, type TelegramMessage, type TelegramUpdate } from "../lib/telegram";
+import { draftLinkedInPost } from "../lib/gemini";
+import { isDuplicate } from "../lib/dedupe";
+
+const DRAFT_LABEL = "📝 Draft:";
+const FAILURE_LABEL = "⚠️ Draft generation failed — check the logs.";
+
+let cachedBotId: number | null = null;
+
+async function getBotId(): Promise<number> {
+  if (cachedBotId !== null) {
+    return cachedBotId;
+  }
+  const me = await getMe();
+  cachedBotId = me.id;
+  return cachedBotId;
+}
+
+function isPlainTextNote(message: TelegramMessage): boolean {
+  if (!message.text) {
+    return false;
+  }
+  if (message.photo || message.sticker) {
+    return false;
+  }
+  if (message.forward_date || message.forward_from_chat) {
+    return false;
+  }
+  return true;
+}
+
+async function generateAndReply(message: TelegramMessage): Promise<void> {
+  try {
+    const draft = await draftLinkedInPost(message.text as string);
+    await sendMessage(message.chat.id, `${DRAFT_LABEL}\n\n${draft}`, message.message_id);
+  } catch (err) {
+    console.error("Draft generation failed", {
+      chatId: message.chat.id,
+      messageId: message.message_id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    try {
+      await sendMessage(message.chat.id, FAILURE_LABEL, message.message_id);
+    } catch (notifyErr) {
+      console.error("Failed to post failure notice", notifyErr);
+    }
+  }
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const providedSecret = req.headers["x-telegram-bot-api-secret-token"];
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    res.status(401).send("Unauthorized");
+    return;
+  }
+
+  const update = req.body as TelegramUpdate;
+  const message = update.channel_post ?? update.message;
+
+  if (!message) {
+    res.status(200).send("OK");
+    return;
+  }
+
+  if (isDuplicate(update.update_id)) {
+    res.status(200).send("OK");
+    return;
+  }
+
+  try {
+    const botId = await getBotId();
+    if (message.from?.id === botId || message.from?.is_bot) {
+      res.status(200).send("OK");
+      return;
+    }
+  } catch (err) {
+    console.error("Failed to resolve bot identity, skipping to be safe", err);
+    res.status(200).send("OK");
+    return;
+  }
+
+  if (!isPlainTextNote(message)) {
+    res.status(200).send("OK");
+    return;
+  }
+
+  waitUntil(generateAndReply(message));
+
+  res.status(200).send("OK");
+}
