@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getTrendingContext } from "./context";
 
 const GENERATION_TIMEOUT_MS = 30_000;
-const MODEL_NAME = "gemini-2.0-flash";
+const MODEL_NAME = "gemini-3.6-flash";
 
 let cachedVoiceSkill: string | null = null;
 
