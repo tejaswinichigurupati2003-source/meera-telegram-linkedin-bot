@@ -4,7 +4,6 @@
   "private": true,
   "description": "Rewrites Meera's raw Telegram notes into LinkedIn drafts in her voice and replies them back into the channel.",
   "scripts": {
-    "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
