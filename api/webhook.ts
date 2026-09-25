@@ -1,10 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { waitUntil } from "@vercel/functions";
 import { getMe, sendMessage, type TelegramMessage, type TelegramUpdate } from "../lib/telegram";
-import { draftLinkedInPost } from "../lib/gemini";
+import { draftLinkedInPost, scoreNoteEligibility } from "../lib/gemini";
 import { isDuplicate } from "../lib/dedupe";
 
 const DRAFT_LABEL = "📝 Draft:";
+const NOT_ELIGIBLE_LABEL = "🚫 Not post-ready yet:";
 const FAILURE_LABEL = "⚠️ Draft generation failed — check the logs.";
 
 let cachedBotId: number | null = null;
@@ -32,8 +33,21 @@ function isPlainTextNote(message: TelegramMessage): boolean {
 }
 
 async function generateAndReply(message: TelegramMessage): Promise<void> {
+  const noteText = message.text as string;
+
   try {
-    const draft = await draftLinkedInPost(message.text as string);
+    const eligibility = await scoreNoteEligibility(noteText);
+
+    if (!eligibility.eligible) {
+      await sendMessage(
+        message.chat.id,
+        `${NOT_ELIGIBLE_LABEL}\n\n${eligibility.reason} (score: ${eligibility.score}/100)`,
+        message.message_id
+      );
+      return;
+    }
+
+    const draft = await draftLinkedInPost(noteText, eligibility.postType);
     await sendMessage(message.chat.id, `${DRAFT_LABEL}\n\n${draft}`, message.message_id);
   } catch (err) {
     console.error("Draft generation failed", {
