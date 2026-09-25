@@ -43,17 +43,27 @@ async function generateAndReply(message: TelegramMessage): Promise<void> {
       ...eligibility,
     });
 
+    const scoreLine =
+      `Specificity ${eligibility.scores.specificity}/10 · Shape clarity ${eligibility.scores.shapeClarity}/10 · ` +
+      `Creativity ${eligibility.scores.creativity}/10 · Brand fit ${eligibility.scores.brandFit}/10 ` +
+      `(Total: ${eligibility.total}/40)`;
+
     if (!eligibility.eligible) {
       await sendMessage(
         message.chat.id,
-        `${NOT_ELIGIBLE_LABEL}\n\n${eligibility.reason} (score: ${eligibility.score}/100)`,
+        `${NOT_ELIGIBLE_LABEL}\n\n${eligibility.reason}\n\n${scoreLine}`,
         message.message_id
       );
       return;
     }
 
-    const draft = await draftLinkedInPost(noteText, eligibility.postType);
-    await sendMessage(message.chat.id, `${DRAFT_LABEL}\n\n${draft}`, message.message_id);
+    const { text: draft, sourceLink } = await draftLinkedInPost(noteText, eligibility.postType);
+    const sourceLine = sourceLink ? `\n\nSource: ${sourceLink}` : "";
+    await sendMessage(
+      message.chat.id,
+      `${DRAFT_LABEL} (${scoreLine})\n\n${draft}${sourceLine}`,
+      message.message_id
+    );
   } catch (err) {
     console.error("Draft generation failed", {
       chatId: message.chat.id,

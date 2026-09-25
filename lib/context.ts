@@ -1,6 +1,7 @@
 const RSS_TIMEOUT_MS = 8_000;
 const MAX_ITEMS = 3;
 const MAX_QUERY_WORDS = 6;
+const FALLBACK_QUERY = "skincare industry India";
 
 const STOPWORDS = new Set([
   "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "for", "with",
@@ -9,7 +10,7 @@ const STOPWORDS = new Set([
   "my", "her", "she", "he", "they", "them", "not", "no", "just", "about",
 ]);
 
-interface NewsItem {
+export interface NewsItem {
   title: string;
   source: string | null;
   link: string;
@@ -84,40 +85,45 @@ function parseRssItems(xml: string): NewsItem[] {
     .filter((item): item is NewsItem => item !== null);
 }
 
-/**
- * Pulls a handful of recent, real headlines from Google News RSS relevant to
- * the note's topic, so drafts can be grounded in a current external
- * reference instead of an invented one.
- */
-export async function getTrendingContext(noteText: string): Promise<string | null> {
-  const query = buildSearchQuery(noteText);
-  if (!query) {
-    return null;
-  }
-
+async function fetchNews(query: string): Promise<NewsItem[]> {
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-IN&gl=IN&ceid=IN:en`;
 
-  try {
-    const res = await withTimeout(fetch(url), RSS_TIMEOUT_MS);
-    if (!res.ok) {
-      console.error("Google News RSS request failed", { status: res.status, query });
-      return null;
-    }
-
-    const xml = await res.text();
-    const items = parseRssItems(xml).slice(0, MAX_ITEMS);
-    if (items.length === 0) {
-      return null;
-    }
-
-    return items
-      .map((item) => {
-        const meta = [item.source, item.pubDate].filter(Boolean).join(", ");
-        return `- ${item.title}${meta ? ` (${meta})` : ""} — ${item.link}`;
-      })
-      .join("\n");
-  } catch (err) {
-    console.error("Failed to fetch trending context", err instanceof Error ? err.message : err);
-    return null;
+  const res = await withTimeout(fetch(url), RSS_TIMEOUT_MS);
+  if (!res.ok) {
+    console.error("Google News RSS request failed", { status: res.status, query });
+    return [];
   }
+
+  const xml = await res.text();
+  return parseRssItems(xml).slice(0, MAX_ITEMS);
+}
+
+/**
+ * Pulls a handful of recent, real headlines from Google News RSS relevant to
+ * the note's topic. Falls back to a generic skincare-industry query so a
+ * draft always has at least one real source to cite, even when the note's
+ * own topic returns no matches.
+ */
+export async function getTrendingNews(noteText: string): Promise<NewsItem[]> {
+  try {
+    const query = buildSearchQuery(noteText);
+    const items = query ? await fetchNews(query) : [];
+    if (items.length > 0) {
+      return items;
+    }
+    return await fetchNews(FALLBACK_QUERY);
+  } catch (err) {
+    console.error("Failed to fetch trending news", err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/** Formats news items as a block for injection into the Gemini prompt. */
+export function formatNewsForPrompt(items: NewsItem[]): string {
+  return items
+    .map((item) => {
+      const meta = [item.source, item.pubDate].filter(Boolean).join(", ");
+      return `- ${item.title}${meta ? ` (${meta})` : ""} — ${item.link}`;
+    })
+    .join("\n");
 }

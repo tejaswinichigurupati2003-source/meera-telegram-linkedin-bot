@@ -13,18 +13,22 @@ channel — no copy-pasting between apps.
    best-effort in-memory dedupe on `update_id`.
 4. It returns `200 OK` immediately, then asynchronously (via
    [`waitUntil`](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil)):
-   1. **Scores the note against the voice-skill's quality gate** — does it
-      have a checkable fact, does it map to one of the six post shapes, does
-      it avoid needing an unbacked Skinstinct claim? Gemini returns a 0-100
-      score, a shape, and a reason as structured JSON. A note scoring below
-      60 gets a `🚫 Not post-ready yet:` reply explaining what's missing —
-      no draft is forced.
+   1. **Scores the note against the voice-skill's quality gate**, 0-10 on
+      each of four criteria — specificity (a checkable fact), shape clarity
+      (maps to one of the six post types), creativity (a non-obvious angle,
+      not a generic take), and brand fit (no invented Skinstinct claim
+      needed). Gemini returns the breakdown, a postType, and a reason as
+      structured JSON. A note scoring below 24/40 gets a
+      `🚫 Not post-ready yet:` reply with the reason and the full score
+      breakdown — no draft is forced.
    2. If it passes, pulls a few real, current headlines relevant to the
-      note's topic from **Google News RSS** (`lib/context.ts`) so the draft
-      can cite a real external reference instead of an invented one.
+      note's topic from **Google News RSS** (`lib/context.ts`), falling
+      back to a generic skincare-industry query if nothing topic-specific
+      comes back, so there's always a real link to cite.
    3. Loads `voice-skill/meera-voice.txt`, calls Gemini with the note + the
       identified shape + those headlines, and replies into the channel with
-      `📝 Draft:` prefixed to the generated post, using
+      `📝 Draft:` prefixed to the generated post (plus its score breakdown),
+      a `Source:` line with the real headline link at the end, using
       `reply_to_message_id` so it threads under Meera's original note.
 5. On failure it logs the error and posts a short `⚠️ Draft generation
    failed` reply so Meera isn't left wondering.
@@ -45,12 +49,13 @@ channel — no copy-pasting between apps.
   self-post guard, content-type guard, dedupe, fast ACK, async generation.
 - `lib/telegram.ts` — thin Telegram Bot API wrapper (`sendMessage`,
   `getMe`).
-- `lib/gemini.ts` — `scoreNoteEligibility` (quality-gate scoring, structured
-  JSON output) and `draftLinkedInPost` (prompt assembly: voice skill + note +
-  identified shape + news context), both against Gemini with a timeout.
-- `lib/context.ts` — fetches and parses a handful of relevant headlines from
-  Google News RSS for the note's topic; returns `null` on no match or
-  failure so drafting still proceeds without it.
+- `lib/gemini.ts` — `scoreNoteEligibility` (4-criterion 0-10 quality-gate
+  rubric, structured JSON output) and `draftLinkedInPost` (prompt assembly:
+  voice skill + note + identified shape + news headlines, returns the draft
+  plus the real source link to attach), both against Gemini with a timeout.
+- `lib/context.ts` — fetches and parses relevant headlines from Google News
+  RSS for the note's topic, with a generic-query fallback so a real link is
+  (almost) always available; returns `[]` on total failure.
 - `lib/dedupe.ts` — in-memory `Set<update_id>`, size-capped.
 - `voice-skill/meera-voice.txt` — the versioned voice-skill prompt. Refine
   Meera's voice over time by editing this file and redeploying; git history
