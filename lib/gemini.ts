@@ -128,6 +128,7 @@ export async function scoreNoteEligibility(noteText: string): Promise<Eligibilit
 export async function draftLinkedInPost(noteText: string, postType: string | null): Promise<string> {
   const voiceSkill = loadVoiceSkill();
   const trendingContext = await getTrendingContext(noteText);
+  console.log("Trending context lookup", { found: trendingContext !== null, postType });
 
   const prompt = [
     voiceSkill,

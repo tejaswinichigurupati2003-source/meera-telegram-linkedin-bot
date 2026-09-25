@@ -37,6 +37,11 @@ async function generateAndReply(message: TelegramMessage): Promise<void> {
 
   try {
     const eligibility = await scoreNoteEligibility(noteText);
+    console.log("Eligibility scored", {
+      chatId: message.chat.id,
+      messageId: message.message_id,
+      ...eligibility,
+    });
 
     if (!eligibility.eligible) {
       await sendMessage(
