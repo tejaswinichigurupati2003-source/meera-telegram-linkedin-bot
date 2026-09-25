@@ -57,7 +57,7 @@ async function generateAndReply(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    const { text: draft, sourceLink } = await draftLinkedInPost(noteText, eligibility.postType);
+    const { text: draft, sourceLink } = await draftLinkedInPost(noteText, eligibility.postType, eligibility.searchQuery);
     const sourceLine = sourceLink ? `\n\nSource: ${sourceLink}` : "";
     await sendMessage(
       message.chat.id,

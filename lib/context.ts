@@ -1,14 +1,6 @@
 const RSS_TIMEOUT_MS = 8_000;
 const MAX_ITEMS = 3;
-const MAX_QUERY_WORDS = 6;
 const FALLBACK_QUERY = "skincare industry India";
-
-const STOPWORDS = new Set([
-  "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "for", "with",
-  "is", "are", "was", "were", "be", "been", "being", "this", "that", "these",
-  "those", "it", "its", "at", "by", "from", "as", "so", "we", "i", "our",
-  "my", "her", "she", "he", "they", "them", "not", "no", "just", "about",
-]);
 
 export interface NewsItem {
   title: string;
@@ -37,17 +29,6 @@ function extractTag(block: string, tag: string): string | null {
   }
   const plainMatch = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
   return plainMatch ? decodeXmlEntities(plainMatch[1].trim()) : null;
-}
-
-function buildSearchQuery(noteText: string): string {
-  const words = noteText
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((word) => word.length > 2 && !STOPWORDS.has(word));
-
-  const uniqueWords = [...new Set(words)].slice(0, MAX_QUERY_WORDS);
-  return uniqueWords.join(" ");
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -99,19 +80,27 @@ async function fetchNews(query: string): Promise<NewsItem[]> {
 }
 
 /**
- * Pulls a handful of recent, real headlines from Google News RSS relevant to
- * the note's topic. Falls back to a generic skincare-industry query so a
- * draft always has at least one real source to cite, even when the note's
- * own topic returns no matches.
+ * Pulls a handful of recent, real headlines from Google News RSS for a given
+ * search query (a precise, topic-specific phrase - see
+ * scoreNoteEligibility's searchQuery output). Tries the phrase as an exact
+ * quoted match first (tightest relevance), then as loose keywords, then
+ * falls back to a generic skincare-industry query so a draft still has an
+ * on-topic source when nothing precise matches.
  */
-export async function getTrendingNews(noteText: string): Promise<NewsItem[]> {
+export async function getTrendingNews(query: string): Promise<NewsItem[]> {
+  if (!query) {
+    return [];
+  }
+
   try {
-    const query = buildSearchQuery(noteText);
-    const items = query ? await fetchNews(query) : [];
-    if (items.length > 0) {
-      return items;
+    for (const candidate of [`"${query}"`, query, FALLBACK_QUERY]) {
+      const items = await fetchNews(candidate);
+      if (items.length > 0) {
+        console.log("News query matched", { candidate, itemCount: items.length });
+        return items;
+      }
     }
-    return await fetchNews(FALLBACK_QUERY);
+    return [];
   } catch (err) {
     console.error("Failed to fetch trending news", err instanceof Error ? err.message : err);
     return [];

@@ -21,15 +21,20 @@ channel — no copy-pasting between apps.
       structured JSON. A note scoring below 24/40 gets a
       `🚫 Not post-ready yet:` reply with the reason and the full score
       breakdown — no draft is forced.
-   2. If it passes, pulls a few real, current headlines relevant to the
-      note's topic from **Google News RSS** (`lib/context.ts`), falling
-      back to a generic skincare-industry query if nothing topic-specific
-      comes back, so there's always a real link to cite.
+   2. If it passes, the same Gemini call also produces a precise,
+      topic-specific search phrase (not the whole note), which
+      `lib/context.ts` uses against **Google News RSS** — first as an exact
+      quoted phrase, then as loose keywords, then a generic
+      skincare-industry query — so headlines are actually on-topic instead
+      of matching on generic words like "skincare".
    3. Loads `voice-skill/meera-voice.txt`, calls Gemini with the note + the
-      identified shape + those headlines, and replies into the channel with
-      `📝 Draft:` prefixed to the generated post (plus its score breakdown),
-      a `Source:` line with the real headline link at the end, using
-      `reply_to_message_id` so it threads under Meera's original note.
+      identified shape + those candidate headlines, and asks it to report
+      which headline (if any) it genuinely cited — the reply's `Source:`
+      link is that exact headline, not just the top search result, so the
+      link always matches what the draft is actually about. Replies with
+      `📝 Draft:` prefixed to the generated post (plus its score breakdown)
+      and the source link at the end, using `reply_to_message_id` so it
+      threads under Meera's original note.
 5. On failure it logs the error and posts a short `⚠️ Draft generation
    failed` reply so Meera isn't left wondering.
 

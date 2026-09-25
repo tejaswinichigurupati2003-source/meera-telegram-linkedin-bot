@@ -29,6 +29,7 @@ export interface EligibilityResult {
   total: number;
   postType: string | null;
   reason: string;
+  searchQuery: string;
 }
 
 const ELIGIBILITY_THRESHOLD = 24; // 60% of 40
@@ -99,8 +100,9 @@ export async function scoreNoteEligibility(noteText: string): Promise<Eligibilit
           },
           postType: { type: SchemaType.STRING, enum: [...POST_TYPES, "none"] },
           reason: { type: SchemaType.STRING },
+          searchQuery: { type: SchemaType.STRING },
         },
-        required: ["scores", "postType", "reason"],
+        required: ["scores", "postType", "reason", "searchQuery"],
       },
     },
   });
@@ -128,6 +130,13 @@ export async function scoreNoteEligibility(noteText: string): Promise<Eligibilit
     "scores - if they're low, say plainly what's missing (e.g. \"has the observation",
     'but no specific number behind it yet").',
     "",
+    "Also set searchQuery: a precise 3-6 word Google News search phrase for the note's",
+    "core factual subject (the specific ingredient, mechanism, product category, or",
+    "incident type) - specific enough to surface a genuinely relevant article, not a",
+    'generic skincare phrase. E.g. for a note about physical sunscreen filters',
+    'degrading after opening, use something like "sunscreen physical filter shelf',
+    'life", not just "sunscreen" or "skincare".',
+    "",
     "RAW NOTE:",
     noteText,
   ].join("\n");
@@ -137,6 +146,7 @@ export async function scoreNoteEligibility(noteText: string): Promise<Eligibilit
     scores: EligibilityScores;
     postType: string;
     reason: string;
+    searchQuery: string;
   };
 
   const total =
@@ -148,6 +158,7 @@ export async function scoreNoteEligibility(noteText: string): Promise<Eligibilit
     total,
     postType: parsed.postType === "none" ? null : parsed.postType,
     reason: parsed.reason,
+    searchQuery: parsed.searchQuery,
   };
 }
 
@@ -158,16 +169,40 @@ export interface DraftResult {
 
 /**
  * Assembles the voice-skill prompt, grounds it in real Google News RSS
- * headlines, and asks Gemini to draft a LinkedIn post from the raw note.
- * Always returns a real source link (falling back to a generic
- * skincare-industry headline if nothing note-specific was found) so every
- * draft can be sent with a genuine reference attached.
+ * headlines fetched with a precise, topic-specific query, and asks Gemini
+ * to draft a LinkedIn post plus report which headline (if any) it actually
+ * used. The returned sourceLink always matches what the draft references,
+ * rather than blindly attaching the top search result - falling back to
+ * that top result only when Gemini didn't need to cite anything specific.
  */
-export async function draftLinkedInPost(noteText: string, postType: string | null): Promise<DraftResult> {
+export async function draftLinkedInPost(
+  noteText: string,
+  postType: string | null,
+  searchQuery: string
+): Promise<DraftResult> {
   const voiceSkill = loadVoiceSkill();
-  const newsItems = await getTrendingNews(noteText);
-  const sourceLink = newsItems[0]?.link ?? null;
-  console.log("News lookup", { postType, itemCount: newsItems.length, sourceLink });
+  const newsItems = await getTrendingNews(searchQuery);
+  console.log("News lookup", { searchQuery, postType, itemCount: newsItems.length });
+
+  const headlineIndices = newsItems.map((_, i) => String(i));
+
+  const model = getClient().getGenerativeModel({
+    model: MODEL_NAME,
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: SchemaType.OBJECT,
+        properties: {
+          post: { type: SchemaType.STRING },
+          citedHeadlineIndex: {
+            type: SchemaType.STRING,
+            enum: headlineIndices.length > 0 ? [...headlineIndices, "none"] : ["none"],
+          },
+        },
+        required: ["post", "citedHeadlineIndex"],
+      },
+    },
+  });
 
   const prompt = [
     voiceSkill,
@@ -176,17 +211,31 @@ export async function draftLinkedInPost(noteText: string, postType: string | nul
     "RAW NOTE FROM MEERA:",
     noteText,
     newsItems.length > 0
-      ? `\nRECENT REAL HEADLINES (ground the post in the most relevant one, and reference it inline; otherwise use them only as context):\n${formatNewsForPrompt(newsItems)}`
+      ? `\nCANDIDATE REAL HEADLINES (indexed). Only cite one inline if it is genuinely` +
+        ` relevant to this specific note's topic - do not force a connection that isn't` +
+        ` there:\n${formatNewsForPrompt(newsItems)}`
       : "",
+    "",
+    'Return JSON: "post" is the full LinkedIn draft (plain text paragraphs, no markdown).',
+    '"citedHeadlineIndex" is the index (as a string, e.g. "0") of the candidate headline',
+    'you actually referenced in the post, or "none" if none of them were relevant enough',
+    "to cite.",
   ].join("\n");
 
-  const model = getClient().getGenerativeModel({ model: MODEL_NAME });
   const result = await withTimeout(model.generateContent(prompt), GENERATION_TIMEOUT_MS);
-  const text = result.response.text().trim();
+  const parsed = JSON.parse(result.response.text()) as { post: string; citedHeadlineIndex: string };
+  const text = parsed.post.trim();
 
   if (!text) {
     throw new Error("Gemini returned an empty response");
   }
 
-  return { text, sourceLink };
+  const citedIndex = parsed.citedHeadlineIndex === "none" ? null : Number(parsed.citedHeadlineIndex);
+  const citedItem = citedIndex !== null ? newsItems[citedIndex] : undefined;
+  // Fall back to the top search result (still topic-matched via searchQuery) if Gemini
+  // didn't cite one specifically, so the link is at least on-topic, never unrelated.
+  const usedItem = citedItem ?? newsItems[0];
+  console.log("Draft source used", { citedIndex, usedTitle: usedItem?.title ?? null, usedLink: usedItem?.link ?? null });
+
+  return { text, sourceLink: usedItem?.link ?? null };
 }
