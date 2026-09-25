@@ -34,9 +34,26 @@ channel — no copy-pasting between apps.
       link always matches what the draft is actually about. Replies with
       `📝 Draft:` prefixed to the generated post (plus its score breakdown)
       and the source link at the end, using `reply_to_message_id` so it
-      threads under Meera's original note.
+      threads under Meera's original note, with three inline buttons
+      attached: **👍 Like it**, **🔁 Redraft**, **🗑️ Kill it**.
 5. On failure it logs the error and posts a short `⚠️ Draft generation
    failed` reply so Meera isn't left wondering.
+6. Tapping a button sends Telegram a `callback_query` update to the same
+   webhook. The handler looks up that note's context (text, identified
+   shape, search query) from an in-memory store keyed by the note's
+   message id, then:
+   - **Like it** — clears the buttons, posts a short "✅ Liked" confirmation.
+   - **Kill it** — clears the buttons, posts a "🗑️ Killed" confirmation.
+   - **Redraft** — clears the old buttons and generates a fresh draft from
+     the same note (skipping re-scoring), replying with a new draft +
+     buttons threaded under the original note.
+
+   Every tap is logged as a `MEERA_FEEDBACK` line (action, note text,
+   identified post type) in Vercel's function logs — the intended record
+   for later analysis of what she likes, redrafts, or kills. There's no
+   database in v1 (see tradeoffs), so this is grep-in-the-dashboard
+   analysis today; the same small KV/DB addition mentioned below would
+   make it queryable.
 
 ## Known tradeoffs (v1, no database)
 
@@ -44,16 +61,27 @@ channel — no copy-pasting between apps.
   function instance but resets on cold starts. Worst case: an occasional
   duplicate draft reply. If this becomes annoying, swap `lib/dedupe.ts` for
   Vercel KV (~10 lines).
-- **Draft history lives in Vercel's function logs**, not a queryable store.
-  Fine for eyeballing recent drafts; not for querying "every draft from
-  March." Same fix (a small KV/DB addition) applies if you outgrow this.
+- **Draft history and like/redraft/kill feedback both live in Vercel's
+  function logs**, not a queryable store. Fine for eyeballing recent drafts
+  or a stretch of `MEERA_FEEDBACK` lines; not for querying "every draft
+  from March" or aggregating her preferences over time. Same fix (a small
+  KV/DB addition) applies if you outgrow this.
+- **Button context is best-effort in-memory too** (`lib/draftStore.ts`),
+  same tradeoff as dedupe: a cold start between posting a note and tapping
+  its button loses that note's context, and the button replies "context
+  expired — repost the note to try again."
 
 ## Project layout
 
 - `api/webhook.ts` — Telegram webhook receiver: secret-token check,
-  self-post guard, content-type guard, dedupe, fast ACK, async generation.
-- `lib/telegram.ts` — thin Telegram Bot API wrapper (`sendMessage`,
-  `getMe`).
+  self-post guard, content-type guard, dedupe, fast ACK, async generation,
+  and `callback_query` handling for the like/redraft/kill buttons.
+- `lib/telegram.ts` — thin Telegram Bot API wrapper (`sendMessage` with an
+  optional inline keyboard, `editMessageReplyMarkup`,
+  `answerCallbackQuery`, `getMe`).
+- `lib/draftStore.ts` — in-memory map from a note's message id to its
+  drafting context (text, shape, search query), so a button tap can act on
+  it without re-fetching from Telegram.
 - `lib/gemini.ts` — `scoreNoteEligibility` (4-criterion 0-10 quality-gate
   rubric, structured JSON output) and `draftLinkedInPost` (prompt assembly:
   voice skill + note + identified shape + news headlines, returns the draft

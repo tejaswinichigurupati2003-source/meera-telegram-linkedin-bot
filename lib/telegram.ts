@@ -20,10 +20,27 @@ export interface TelegramMessage {
   forward_from_chat?: unknown;
 }
 
+export interface CallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   channel_post?: TelegramMessage;
   message?: TelegramMessage;
+  callback_query?: CallbackQuery;
+}
+
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
 }
 
 function botToken(): string {
@@ -49,17 +66,40 @@ async function callTelegramApi<T>(method: string, payload: Record<string, unknow
   return data.result;
 }
 
-/** Sends a text message, optionally as a reply to another message in the same chat. */
+/** Sends a text message, optionally as a reply and/or with an inline keyboard attached. */
 export async function sendMessage(
   chatId: number,
   text: string,
-  replyToMessageId?: number
+  replyToMessageId?: number,
+  replyMarkup?: InlineKeyboardMarkup
 ): Promise<TelegramMessage> {
   return callTelegramApi<TelegramMessage>("sendMessage", {
     chat_id: chatId,
     text,
     reply_to_message_id: replyToMessageId,
     allow_sending_without_reply: true,
+    reply_markup: replyMarkup,
+  });
+}
+
+/** Replaces (or clears, with an empty list) a sent message's inline keyboard. */
+export async function editMessageReplyMarkup(
+  chatId: number,
+  messageId: number,
+  replyMarkup: InlineKeyboardMarkup
+): Promise<void> {
+  await callTelegramApi<TelegramMessage>("editMessageReplyMarkup", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: replyMarkup,
+  });
+}
+
+/** Acknowledges a button tap so Telegram's client-side loading spinner clears. */
+export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+  await callTelegramApi<boolean>("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text,
   });
 }
 
